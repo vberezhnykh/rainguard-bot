@@ -3,7 +3,7 @@ const axios = require('axios');
 const cron = require('node-cron');
 
 // --- КОНФИГУРАЦИЯ ---
-const BOT_TOKEN = 'ВАШ_ТОКЕН_ИЗ_BOTFATHER';
+const BOT_TOKEN = '8540069219:AAGZivvxcbLIekiSbUvfzIdpsHryneY2Zhg';
 const CHAT_ID = 'ВАШ_ID_ЧАТА'; 
 const LAT = 34.6593;
 const LNG = 33.0038;
