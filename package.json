@@ -1,0 +1,14 @@
+{
+  "name": "rainguard-bot",
+  "version": "1.0.0",
+  "description": "Weather monitoring bot",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js"
+  },
+  "dependencies": {
+    "telegraf": "^4.16.3",
+    "axios": "^1.6.7",
+    "node-cron": "^3.0.3"
+  }
+}
