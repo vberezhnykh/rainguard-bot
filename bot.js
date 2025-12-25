@@ -5,33 +5,37 @@ const http = require('http');
 
 // --- КОНФИГУРАЦИЯ ---
 const BOT_TOKEN = '8540069219:AAGZivvxcbLIekiSbUvfzIdpsHryneY2Zhg';
-const CHAT_ID = 'ВАШ_ID_ЧАТА'; 
+const CHAT_ID = '309261147'; 
 const LAT = 34.6593;
 const LNG = 33.0038;
 const ADDRESS = "Andrea Achillidi 10a, Zakaki, Limassol";
 
-// --- ФЕЙКОВЫЙ СЕРВЕР ДЛЯ RENDER ---
+// --- СЕРВЕР ДЛЯ RENDER (Health Check) ---
 const port = process.env.PORT || 3000;
 http.createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/plain' });
-  res.end('RainGuard Bot is alive!\n');
+  res.end('RainGuard Bot is running!\n');
 }).listen(port, () => {
   console.log(`Web server listening on port ${port}`);
 });
 
 const bot = new Telegraf(BOT_TOKEN);
 
+// Функция получения погоды
+async function getWeather() {
+  const url = `https://api.open-meteo.com/v1/forecast?latitude=${LAT}&longitude=${LNG}&current=temperature_2m,precipitation,wind_speed_10m&hourly=temperature_2m,precipitation,wind_speed_10m&timezone=auto`;
+  const { data } = await axios.get(url);
+  return data;
+}
+
 async function checkWeather(isManual = false, targetId = CHAT_ID) {
-  // Если ID еще не настроен в коде, бот не сможет слать уведомления по расписанию
   if (!targetId || targetId === 'ВАШ_ID_ЧАТА' || targetId === '') {
-    if (!isManual) console.log("Уведомление не отправлено: CHAT_ID не настроен. Напишите /start боту.");
+    if (!isManual) console.log("CHAT_ID не настроен. Напишите /start боту.");
     return;
   }
   
   try {
-    const url = `https://api.open-meteo.com/v1/forecast?latitude=${LAT}&longitude=${LNG}&current=temperature_2m,precipitation,wind_speed_10m&hourly=temperature_2m,precipitation,wind_speed_10m&timezone=auto`;
-    const { data } = await axios.get(url);
-    
+    const data = await getWeather();
     const current = data.current;
     const hourly = data.hourly;
     
@@ -43,7 +47,7 @@ async function checkWeather(isManual = false, targetId = CHAT_ID) {
     } else if (rainSoon && !isManual) {
       await bot.telegram.sendMessage(targetId, "⚠️ Внимание! В ближайшие 12 часов ожидается дождь. Не забудьте про вещи на улице. ☁️");
     } else if (isManual) {
-      const msg = `📍 Погода (${ADDRESS}):\n🌡 Темп: ${current.temperature_2m}°C\n💧 Осадки: ${current.precipitation}мм\n💨 Ветер: ${current.wind_speed_10m}км/ч`;
+      const msg = `📍 Текущая погода (${ADDRESS}):\n🌡 Темп: ${current.temperature_2m}°C\n💧 Осадки: ${current.precipitation}мм\n💨 Ветер: ${current.wind_speed_10m}км/ч`;
       await bot.telegram.sendMessage(targetId, msg);
     }
   } catch (e) {
@@ -51,12 +55,33 @@ async function checkWeather(isManual = false, targetId = CHAT_ID) {
   }
 }
 
+// Команда /start для получения ID
 bot.start((ctx) => {
-  const msg = "✅ Бот подключен!\n\nТвой Chat ID: " + ctx.chat.id + "\n\nСкопируй это число, вставь в настройки на сайте и обнови bot.js, чтобы я мог присылать тебе автоматические предупреждения о дожде! 🧺";
+  const msg = "✅ Бот на связи!\n\nТвой Chat ID: " + ctx.chat.id + "\n\nСкопируй это число, вставь его в поле 'Chat ID' на сайте и обнови bot.js. Это нужно, чтобы я мог присылать тебе уведомления автоматически! 🧺";
   ctx.reply(msg);
 });
 
+// Команда /weather - текущая погода
 bot.command('weather', (ctx) => checkWeather(true, ctx.chat.id));
+
+// Команда /tonight - погода на ночь (22:00)
+bot.command('tonight', async (ctx) => {
+  try {
+    const data = await getWeather();
+    const tonightIndex = data.hourly.time.findIndex(t => t.includes('T22:00'));
+    if (tonightIndex !== -1) {
+      const temp = data.hourly.temperature_2m[tonightIndex];
+      const prec = data.hourly.precipitation[tonightIndex];
+      const wind = data.hourly.wind_speed_10m[tonightIndex];
+      const msg = `🌙 Прогноз на ночь (22:00):\n🌡 Темп: ${temp}°C\n💧 Осадки: ${prec}мм\n💨 Ветер: ${wind}км/ч`;
+      ctx.reply(msg);
+    } else {
+      ctx.reply("Не удалось найти прогноз на эту ночь.");
+    }
+  } catch (e) {
+    ctx.reply("Ошибка при получении прогноза.");
+  }
+});
 
 // Проверка каждые 15 минут
 cron.schedule('*/15 * * * *', () => checkWeather());
