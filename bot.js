@@ -11,8 +11,7 @@ const LNG = 33.0038;
 const ADDRESS = "Andrea Achillidi 10a, Zakaki, Limassol";
 const APP_URL = process.env.RENDER_EXTERNAL_URL;
 
-// Порог осадков (мм), выше которого поднимаем панику
-const RAIN_THRESHOLD = 0.5; 
+const RAIN_THRESHOLD = 0.5; // Минимальный порог в мм
 
 if (!BOT_TOKEN || !CHAT_ID) {
   console.error('❌ ОШИБКА: Проверьте переменные BOT_TOKEN и CHAT_ID!');
@@ -29,7 +28,7 @@ http.createServer((req, res) => {
     return res.end('ok');
   }
   res.writeHead(200, { 'Content-Type': 'text/plain' });
-  res.end('RainGuard Bot v2.7 Precision is Live!\n');
+  res.end('RainGuard Bot v2.8 Smart Forecast is Live!\n');
 }).listen(port, () => {
   console.log(`[System] Server monitoring port ${port}`);
 });
@@ -39,37 +38,32 @@ const bot = new Telegraf(BOT_TOKEN);
 bot.catch((err) => console.error(`[Bot Error] ${err.message}`));
 
 const mainMenu = Markup.keyboard([
-  ['🌡️ Погода сейчас', '🌙 Прогноз на ночь'],
-  ['ℹ️ Помощь']
+  ['🌡️ Погода сейчас', '📅 Прогноз на день'],
+  ['🌙 Прогноз на ночь', 'ℹ️ Помощь']
 ]).resize();
 
 async function getWeather() {
-  // Добавили weather_code для точности
   const url = `https://api.open-meteo.com/v1/forecast?latitude=${LAT}&longitude=${LNG}&current=temperature_2m,precipitation,weather_code,wind_speed_10m&hourly=temperature_2m,precipitation,weather_code&timezone=auto`;
   const { data } = await axios.get(url);
   return data;
 }
 
-// Пояснение кодов погоды WMO (51+ это дождь разной силы)
 function isActuallyRaining(code, precipitation) {
-  const isRainyCode = code >= 51; // 51-67 морось/дождь, 80-82 ливни
-  return isRainyCode && precipitation >= RAIN_THRESHOLD;
+  return code >= 51 && precipitation >= RAIN_THRESHOLD;
 }
 
 async function checkWeather(isManual = false, targetId = CHAT_ID) {
   try {
     const data = await getWeather();
     const current = data.current;
-    
     const rainingNow = isActuallyRaining(current.weather_code, current.precipitation);
 
     if (isManual) {
-      const rainStatus = current.precipitation > 0 ? `💧 Осадки: ${current.precipitation} мм` : "☀️ Осадков нет";
-      const msg = `📍 Погода прямо сейчас:\n🌡 Температура: ${current.temperature_2m}°C\n${rainStatus}\n💨 Ветер: ${current.wind_speed_10m} км/ч`;
+      const msg = `📍 Погода сейчас:\n🌡 ${current.temperature_2m}°C\n${current.precipitation > 0 ? '💧 Осадки: ' + current.precipitation + ' мм' : '☀️ Осадков нет'}\n💨 Ветер: ${current.wind_speed_10m} км/ч`;
       await bot.telegram.sendMessage(targetId, msg, mainMenu);
     } else {
       if (rainingNow && !wasRaining) {
-        await bot.telegram.sendMessage(targetId, `🚨 ВНИМАНИЕ! Обнаружен дождь (${current.precipitation} мм). Рекомендуется убрать вещи! 🧺🌧️`);
+        await bot.telegram.sendMessage(targetId, `🚨 ВНИМАНИЕ! Начался дождь (${current.precipitation} мм). Уберите вещи! 🧺🌧️`);
       } else if (!rainingNow && wasRaining) {
         await bot.telegram.sendMessage(targetId, "☀️ Дождь прекратился. Можно сушить вещи! 🧺");
       }
@@ -78,31 +72,68 @@ async function checkWeather(isManual = false, targetId = CHAT_ID) {
   } catch (e) { console.error("Check failed:", e.message); }
 }
 
-bot.start((ctx) => ctx.reply("✅ RainGuard v2.7 (Precision) готов!", mainMenu));
-
-bot.command('debug', async (ctx) => {
-  const data = await getWeather();
-  const c = data.current;
-  ctx.reply(`🛠 DEBUG INFO:\nCode: ${c.weather_code}\nPrec: ${c.precipitation}mm\nThreshold: ${RAIN_THRESHOLD}mm`);
-});
+bot.start((ctx) => ctx.reply("✅ RainGuard v2.8 (Smart Forecast) готов к работе!", mainMenu));
 
 bot.hears('🌡️ Погода сейчас', (ctx) => checkWeather(true, ctx.chat.id));
+
+bot.hears('📅 Прогноз на день', async (ctx) => {
+  try {
+    const data = await getWeather();
+    const next12Hours = data.hourly.time.slice(0, 12);
+    const rainTimes = [];
+    let maxTemp = -99;
+
+    next12Hours.forEach((time, i) => {
+      const prec = data.hourly.precipitation[i];
+      const code = data.hourly.weather_code[i];
+      if (isActuallyRaining(code, prec)) {
+        const hour = new Date(time).getHours();
+        rainTimes.push(`${hour}:00`);
+      }
+      if (data.hourly.temperature_2m[i] > maxTemp) maxTemp = data.hourly.temperature_2m[i];
+    });
+
+    let msg = `📅 Прогноз на ближайшие 12 часов:\n🌡 Макс. температура: ${maxTemp}°C\n\n`;
+    if (rainTimes.length > 0) {
+      msg += `⚠️ Внимание! Дождь ожидается в: ${rainTimes.join(', ')}. Спланируйте сушку вещей! 🧺🌧️`;
+    } else {
+      msg += `☀️ Дождя не ожидается. Отличный день для стирки! ✅`;
+    }
+    ctx.reply(msg, mainMenu);
+  } catch (e) { ctx.reply("Ошибка прогноза на день."); }
+});
 
 bot.hears('🌙 Прогноз на ночь', async (ctx) => {
   try {
     const data = await getWeather();
-    const tonightIndex = data.hourly.time.findIndex(t => t.includes('T22:00'));
-    if (tonightIndex !== -1) {
-      const prec = data.hourly.precipitation[tonightIndex];
-      const code = data.hourly.weather_code[tonightIndex];
-      const willRain = isActuallyRaining(code, prec);
-      const status = willRain ? "⚠️ Вероятен дождь!" : "✅ Должно быть сухо.";
-      ctx.reply(`🌙 Прогноз на 22:00:\n${status}\n🌡 Темп: ${data.hourly.temperature_2m[tonightIndex]}°C\n💧 Осадки: ${prec}мм`, mainMenu);
+    const rainTimes = [];
+    
+    // Сканируем с 22:00 сегодня до 07:00 завтра
+    data.hourly.time.forEach((time, i) => {
+      const date = new Date(time);
+      const hour = date.getHours();
+      // Упрощенная логика выбора ночных часов из массива (первые 24 часа)
+      const isNight = hour >= 22 || hour <= 7;
+      if (isNight && i < 24) {
+        const prec = data.hourly.precipitation[i];
+        const code = data.hourly.weather_code[i];
+        if (isActuallyRaining(code, prec)) {
+          rainTimes.push(`${hour}:00`);
+        }
+      }
+    });
+
+    let msg = `🌙 Прогноз на ночь (22:00 - 07:00):\n\n`;
+    if (rainTimes.length > 0) {
+      msg += `🚨 Внимание! Ночью будет дождь в: ${rainTimes.join(', ')}. Уберите вещи с вечера! 🧺🌧️`;
+    } else {
+      msg += `✅ Ночь будет сухой. Можно оставлять вещи на улице! 🌙☀️`;
     }
-  } catch (e) { ctx.reply("Ошибка прогноза."); }
+    ctx.reply(msg, mainMenu);
+  } catch (e) { ctx.reply("Ошибка прогноза на ночь."); }
 });
 
-bot.hears('ℹ️ Помощь', (ctx) => ctx.reply("Я слежу за дождем с порогом чувствительности 0.5мм."));
+bot.hears('ℹ️ Помощь', (ctx) => ctx.reply("Я — RainGuard v2.8. Помогаю беречь белье!\n\n- На день: прогноз на 12 часов.\n- На ночь: проверка с 22:00 до 07:00."));
 
 cron.schedule('*/15 * * * *', () => checkWeather());
 
@@ -110,7 +141,7 @@ async function startBot(retries = 5) {
   try {
     await bot.telegram.deleteWebhook({ drop_pending_updates: true });
     await bot.launch();
-    console.log("🚀 RainGuard v2.7 Precision успешно запущен!");
+    console.log("🚀 RainGuard v2.8 успешно запущен!");
   } catch (err) {
     if (err.message.includes('409') && retries > 0) {
       setTimeout(() => startBot(retries - 1), 5000);
