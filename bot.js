@@ -3,13 +3,18 @@ const axios = require('axios');
 const cron = require('node-cron');
 const http = require('http');
 
-// --- КОНФИГУРАЦИЯ ---
-const BOT_TOKEN = '8540069219:AAGZivvxcbLIekiSbUvfzIdpsHryneY2Zhg';
-const CHAT_ID = '309261147'; 
+// --- КОНФИГУРАЦИЯ (Берем из Environment Variables) ---
+const BOT_TOKEN = process.env.BOT_TOKEN;
+const CHAT_ID = process.env.CHAT_ID; 
 const LAT = 34.6593;
 const LNG = 33.0038;
 const ADDRESS = "Andrea Achillidi 10a, Zakaki, Limassol";
-const APP_URL = process.env.RENDER_EXTERNAL_URL; // Render сам подставит URL
+const APP_URL = process.env.RENDER_EXTERNAL_URL;
+
+if (!BOT_TOKEN || !CHAT_ID) {
+  console.error('❌ ОШИБКА: Переменные BOT_TOKEN или CHAT_ID не заданы в настройках Render!');
+  process.exit(1);
+}
 
 let wasRaining = false;
 
@@ -21,27 +26,25 @@ http.createServer((req, res) => {
     return res.end('ok');
   }
   res.writeHead(200, { 'Content-Type': 'text/plain' });
-  res.end('RainGuard Bot is Live!\n');
+  res.end('RainGuard Bot is Live and Secure!\n');
 }).listen(port, () => {
   console.log(`[System] Server monitoring port ${port}`);
 });
 
-// Функция самопрозвона (Keep-Alive)
 function keepAlive() {
   if (!APP_URL) return;
   setInterval(async () => {
     try {
       await axios.get(APP_URL);
-      console.log('[System] Self-ping successful - Stayin\' alive!');
+      console.log('[System] Self-ping successful');
     } catch (e) {
-      console.log('[System] Self-ping failed, but that\'s okay.');
+      console.log('[System] Self-ping failed');
     }
-  }, 10 * 60 * 1000); // Каждые 10 минут
+  }, 10 * 60 * 1000);
 }
 
 const bot = new Telegraf(BOT_TOKEN);
 
-// Глобальная обработка ошибок
 bot.catch((err, ctx) => {
   console.error(`[Error] Critical bot error for ${ctx.updateType}:`, err);
 });
@@ -65,7 +68,6 @@ async function getWeather() {
 }
 
 async function checkWeather(isManual = false, targetId = CHAT_ID) {
-  if (!targetId) return;
   try {
     const data = await getWeather();
     const current = data.current;
@@ -92,8 +94,8 @@ async function checkWeather(isManual = false, targetId = CHAT_ID) {
   } catch (e) { console.error("Check failed:", e.message); }
 }
 
-bot.start((ctx) => ctx.reply("✅ RainGuard v2.4 готов!", mainMenu));
-bot.command('status', (ctx) => ctx.reply(`🤖 Статус: Online\n🌐 URL: ${APP_URL || 'Not set'}`));
+bot.start((ctx) => ctx.reply("✅ RainGuard v2.5 (Secure) готов!", mainMenu));
+bot.command('status', (ctx) => ctx.reply(`🤖 Статус: Online\n🛡 Безопасность: Переменные окружения активны.`));
 
 bot.hears('🌡️ Погода сейчас', (ctx) => checkWeather(true, ctx.chat.id));
 bot.hears('ℹ️ Помощь', (ctx) => ctx.reply("Я слежу за дождем 24/7."));
@@ -102,11 +104,11 @@ cron.schedule('*/15 * * * *', () => checkWeather());
 
 (async () => {
   try {
-    console.log("Starting RainGuard v2.4 (Keep-Alive)...");
+    console.log("Starting RainGuard v2.5 (Environment Variables)...");
     await bot.telegram.deleteWebhook({ drop_pending_updates: true });
     await bot.launch();
     keepAlive();
-    console.log("Bot is fully operational!");
+    console.log("Bot is fully operational and secure!");
   } catch (err) {
     console.error("Launch fatal:", err.message);
   }
