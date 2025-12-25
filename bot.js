@@ -9,24 +9,46 @@ const CHAT_ID = '309261147';
 const LAT = 34.6593;
 const LNG = 33.0038;
 const ADDRESS = "Andrea Achillidi 10a, Zakaki, Limassol";
+const APP_URL = process.env.RENDER_EXTERNAL_URL; // Render сам подставит URL
 
 let wasRaining = false;
 
-// --- СЕРВЕР ДЛЯ RENDER ---
+// --- СЕРВЕР И КИП-АЛАЙВ ---
 const port = process.env.PORT || 3000;
 http.createServer((req, res) => {
+  if (req.url === '/healthz') {
+    res.writeHead(200);
+    return res.end('ok');
+  }
   res.writeHead(200, { 'Content-Type': 'text/plain' });
-  res.end('RainGuard Bot is running!\n');
+  res.end('RainGuard Bot is Live!\n');
 }).listen(port, () => {
-  console.log(`Web server listening on port ${port}`);
+  console.log(`[System] Server monitoring port ${port}`);
 });
+
+// Функция самопрозвона (Keep-Alive)
+function keepAlive() {
+  if (!APP_URL) return;
+  setInterval(async () => {
+    try {
+      await axios.get(APP_URL);
+      console.log('[System] Self-ping successful - Stayin\' alive!');
+    } catch (e) {
+      console.log('[System] Self-ping failed, but that\'s okay.');
+    }
+  }, 10 * 60 * 1000); // Каждые 10 минут
+}
 
 const bot = new Telegraf(BOT_TOKEN);
 
-// Логирование всех входящих сообщений для диагностики
+// Глобальная обработка ошибок
+bot.catch((err, ctx) => {
+  console.error(`[Error] Critical bot error for ${ctx.updateType}:`, err);
+});
+
 bot.use(async (ctx, next) => {
   if (ctx.message) {
-    console.log(`[Incoming] From: ${ctx.from.first_name} (ID: ${ctx.from.id}) Text: "${ctx.message.text || 'media'}"`);
+    console.log(`[Incoming] ${ctx.from.first_name}: "${ctx.message.text || 'media'}"`);
   }
   return next();
 });
@@ -43,8 +65,7 @@ async function getWeather() {
 }
 
 async function checkWeather(isManual = false, targetId = CHAT_ID) {
-  if (!targetId || targetId === '') return;
-  
+  if (!targetId) return;
   try {
     const data = await getWeather();
     const current = data.current;
@@ -55,61 +76,39 @@ async function checkWeather(isManual = false, targetId = CHAT_ID) {
 
     if (!isManual) {
       if (isRainingNow && !wasRaining) {
-        await bot.telegram.sendMessage(targetId, "🚨 СРОЧНО! Начинается дождь! Уберите вещи! 🧺🌧️\n📍 " + ADDRESS);
+        await bot.telegram.sendMessage(targetId, "🚨 СРОЧНО! Начинается дождь! Уберите вещи! 🧺🌧️");
       } else if (!isRainingNow && wasRaining) {
-        await bot.telegram.sendMessage(targetId, "☀️ Ура! Дождь закончился. Можно снова вывешивать вещи сушиться! 🧺🧤\n📍 " + ADDRESS);
+        await bot.telegram.sendMessage(targetId, "☀️ Дождь закончился! Можно сушить вещи. 🧺");
       } else if (rainSoon && !isRainingNow && !wasRaining) {
-        await bot.telegram.sendMessage(targetId, "⚠️ Внимание! В ближайшие 12 часов ожидается дождь. Не забудьте про вещи! ☁️");
+        await bot.telegram.sendMessage(targetId, "⚠️ Внимание! Ожидается дождь в ближайшие 12 часов. ☁️");
       }
       wasRaining = isRainingNow;
     }
 
     if (isManual) {
-      const msg = `📍 Погода (${ADDRESS}):\n🌡 Температура: ${current.temperature_2m}°C\n💧 Осадки: ${current.precipitation} мм\n💨 Ветер: ${current.wind_speed_10m} км/ч`;
+      const msg = `📍 Погода:\n🌡 ${current.temperature_2m}°C\n💧 Осадки: ${current.precipitation} мм`;
       await bot.telegram.sendMessage(targetId, msg, mainMenu);
     }
-  } catch (e) {
-    console.error("Weather check failed:", e.message);
-  }
+  } catch (e) { console.error("Check failed:", e.message); }
 }
 
-bot.start((ctx) => {
-  ctx.reply("✅ RainGuard активирован!\n\nТвой актуальный ID: " + ctx.from.id, mainMenu);
-});
-
-bot.command('status', (ctx) => {
-  ctx.reply(`🤖 Статус: Работаю!\n📍 Адрес: ${ADDRESS}\n🆔 Твой ID: ${ctx.from.id}\n🔔 Целевой CHAT_ID: ${CHAT_ID}`);
-});
+bot.start((ctx) => ctx.reply("✅ RainGuard v2.4 готов!", mainMenu));
+bot.command('status', (ctx) => ctx.reply(`🤖 Статус: Online\n🌐 URL: ${APP_URL || 'Not set'}`));
 
 bot.hears('🌡️ Погода сейчас', (ctx) => checkWeather(true, ctx.chat.id));
-bot.hears('🌙 Прогноз на ночь', async (ctx) => {
-  try {
-    const data = await getWeather();
-    const tonightIndex = data.hourly.time.findIndex(t => t.includes('T22:00'));
-    if (tonightIndex !== -1) {
-      const temp = data.hourly.temperature_2m[tonightIndex];
-      const prec = data.hourly.precipitation[tonightIndex];
-      const wind = data.hourly.wind_speed_10m[tonightIndex];
-      const status = prec > 0.1 ? "⚠️ Ожидается дождь!" : "✅ Будет сухо.";
-      ctx.reply(`🌙 Прогноз на 22:00:\n${status}\n🌡 Темп: ${temp}°C\n💧 Осадки: ${prec}мм\n💨 Ветер: ${wind}км/ч`, mainMenu);
-    }
-  } catch (e) { ctx.reply("Ошибка прогноза."); }
-});
-
-bot.hears('ℹ️ Помощь', (ctx) => {
-  ctx.reply("Я слежу за дождем каждые 15 минут.\n📍 Адрес: " + ADDRESS, mainMenu);
-});
+bot.hears('ℹ️ Помощь', (ctx) => ctx.reply("Я слежу за дождем 24/7."));
 
 cron.schedule('*/15 * * * *', () => checkWeather());
 
 (async () => {
   try {
-    console.log("Starting RainGuard v2.3...");
+    console.log("Starting RainGuard v2.4 (Keep-Alive)...");
     await bot.telegram.deleteWebhook({ drop_pending_updates: true });
     await bot.launch();
-    console.log("Bot successfully connected to Telegram!");
+    keepAlive();
+    console.log("Bot is fully operational!");
   } catch (err) {
-    console.error("Launch error:", err.message);
+    console.error("Launch fatal:", err.message);
   }
 })();
 
